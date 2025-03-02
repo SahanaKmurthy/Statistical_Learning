@@ -1,0 +1,177 @@
+---
+title: "Project-1"
+author: "Sahana Krishna Murthy"
+date: "2024-09-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE}
+df = read.csv("C:/Users/Lenovo/OneDrive/Documents/CMU/Overview of Statistical Learning/Project/cmu-sleep.csv" , header = TRUE , stringsAsFactors = TRUE)
+```
+```{r}
+ncol(df)
+colnames(df)
+nrow(df)
+summary(df)
+```
+
+ 
+Column cohort seems to be a  categorical variable and the others are quantitative. 
+We can either use it for further analysis or just drop the column and continue with the statistical analysis.
+I also notice some of the rows with NA's. For the purpose of this project, I want to remove all the rows with NA's
+Columns like demo_race and demo_gender looks to be like binary datatype. With 0 representing one type and 1 representing other type.
+Column bedtime_mssd has a mean value of 0.451 but a max value of 20.849, which possibly indicates some outliers.
+From the TotalSleepTime, we see that the average participant is getting around 397.3 minutes of sleep.
+From the cum_gpa col, we see that participants have a considerably high gpa (around 75th percentile).
+Also, the term_gpa shows high gpa range for the current term.
+
+```{r}
+library(dplyr)
+
+df_clean <- df %>% filter(complete.cases(.))
+nrow(df_clean)
+```
+We had 634 rows in our initial dataset. And after dropping the rows with NA values, we end up with 481 rows.
+
+Analysing the Categorical variable:
+```{r}
+suppressMessages(library(tidyverse))
+ggplot(data = df_clean , mapping = aes(x = cohort)) + geom_bar(fill = "darkred")
+```
+From the above bar graph, we can see that there are four distinct variables in the cohort col.
+values such as uw1, uw2 and lac1 have highest number of data points.
+
+Analysing the term_gpa (target variable) on its own:
+```{r}
+ggplot(data = df_clean , mapping = aes(x = term_gpa , y = after_stat(density))) + 
+  geom_histogram(bins = 30 , fill = "black") + xlab("Concentration")
+```
+As noticed from the summary, our target variable: term_gpa is left skewed. Which means that most of the values are
+concentrated near the higher end which tails towards the lower values. So the participants are doing very well in their academics.
+
+```{r}
+df.new <- df_clean %>% select(.,-cohort) %>% gather(.)
+ggplot(data=df.new,mapping=aes(x=value)) +
+  geom_histogram(fill="blue",bins=30) +
+  facet_wrap(~key,scales='free')
+```
+The graphs represents the analysis of the summary above. 
+The col subject_id has a wide range of numbers while the dataset contains only 481 rows. This may either indicate possible outliers or non-contiguous subject numbering.
+
+Visualizing correlation matrix
+```{r}
+suppressMessages(library(corrplot))
+df.numeric <- df.new %>% select_if(is.numeric)
+corr_matrix <- cor(df.numeric, use = "complete.obs")
+corrplot(corr_matrix, method = "color", type = "lower", tl.cex = 0.8, tl.col = "black", 
+         title = "Correlation Matrix with Term GPA", addCoef.col = "black", number.cex = 0.7)
+```
+
+Examining association between cohort and term_gpa
+```{r}
+ggplot(data=df_clean,mapping=aes(x=cohort,y=term_gpa)) +
+  geom_boxplot(fill="seagreen") +
+  xlab("Cohort") + ylab("term_gpa")
+```
+From the above boxplot, we can infer that lac2 and uw1 have higher median than the other two categories and lac1 is more spread out than the other categories. All the four categories have some outliers present in them.
+
+Examining association between demo_gender and term_gpa
+```{r}
+ggplot(df_clean, aes(x = factor(demo_gender), y = term_gpa)) + 
+  geom_boxplot(fill = "lightblue") + 
+  xlab("Gender") + ylab("Term GPA") + 
+  ggtitle("Term GPA by Gender")
+```
+GPA's for both the genders have the same median for term_gpa. The GPA's for gender group 1 are more spread out. There is more variability in the GPA for gender 1. However, most participants in gender 0 have GPA closer to the median. Their GPA is more consistent.
+
+Examining association between demo_race and term_gpa
+```{r}
+ggplot(df_clean, aes(x = factor(demo_race), y = term_gpa)) + 
+  geom_boxplot(fill = "purple") + 
+  xlab("Gender") + ylab("Term GPA") + 
+  ggtitle("Term GPA by Race")
+```
+The GPA for race 1 has a higher median than gpa for race 0. Also, there are quite a few outliers present for race1. However, more than 50% of participants in race0 have relatively high GPA's, as the median is closer to the 75th percentile.
+
+Scatter plots of Predictor variables like  totalsleeptime vs term_gpa
+```{r}
+ggplot(df_clean, aes(x = TotalSleepTime, y = term_gpa)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  ggtitle("Total Sleep Time vs Term GPA")
+```
+From the scatter plot, we can infer that there is positive correlation between total_sleeptime and term_gpa. This is also indicated by the red linear regression line. Which means that as the total sleep time increases, term_gpa also increses.
+
+Scatter plots of Predictor variables like midpointsleep vs term_gpa
+```{r}
+ggplot(df_clean, aes(x = midpoint_sleep, y = term_gpa)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  ggtitle("Mid Point Sleep Time vs Term GPA")
+```
+From the scatter plot, we can infer that there is negative correlation between midpoint_sleep and term_gpa. As the midpoint sleep increases, there is a reduction in the term_gpa.
+
+Scatter plots of Predictor variables like bedtime_mssd vs term_gpa
+```{r}
+ggplot(df_clean, aes(x = bedtime_mssd, y = term_gpa)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  ggtitle("Bed Time MSSD vs Term GPA")
+```
+From the above scatter plot, we can infer that most of the studens have consistent bedtimes, but a smaller group of participants have irregular bedtimes and this affects the term_gpa negatively. There is a negative correlation between term_gpa and bedtime_mssd
+
+Scatter plots of Predictor variables like daytime_sleep vs term_gpa
+```{r}
+ggplot(df_clean, aes(x = daytime_sleep, y = term_gpa)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  ggtitle("Daytime Sleep vs Term GPA")
+```
+Again, the plot shows negative correlation between term_gpa and daytime sleep. Which means that participants who do not get daytime sleep tend to do well in their academic performance than the students who go for daytime sleep.
+
+Scatter plots of Predictor variables like frac_nights_with_data vs term_gpa
+```{r}
+ggplot(df_clean, aes(x = frac_nights_with_data, y = term_gpa)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  ggtitle("frac_nights_with_data vs Term GPA")
+```
+While there’s a slight positive relationship between consistent sleep data tracking and higher GPA, it’s not a strong correlation, and the scatter near lower frac_nights_with_data values suggests that other factors are at play for those students.
+
+Scatter plots of Predictor variables like frac_nights_with_data vs term_gpa
+```{r}
+ggplot(df_clean, aes(x = frac_nights_with_data, y = term_gpa)) +
+  geom_point(alpha = 0.6, color = "blue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  ggtitle("frac_nights_with_data vs Term GPA")
+```
+Analyzing cum_gpa, term_units and zterm_units via ggpairs plot
+```{r}
+library(GGally)
+library(ggplot2)
+# Selecting relevant columns
+df_subset <- df_clean %>% select(term_gpa, cum_gpa, term_units, Zterm_units_ZofZ)
+# Creating pair plots
+ggpairs(df_subset, 
+        title = "Pairwise Plots for Selected Variables",
+        mapping = aes(color = term_gpa), # Optional: color by term_gpa
+        upper = list(continuous = wrap("points", alpha = 0.5)),
+        lower = list(continuous = wrap("points", alpha = 0.5)))
+```
+I chose to go with ggpairs for the cum_gpa, term_units and zterm_units_zofz columns because based on the title of these columns, it would be easier to group them together and visualize.
+From the plot above, we can infer that participants who have higher cumulative gpa tend to also have higher term gpa's.
+There are lower participants with low term gpa's when their cumulative gpa's are high. This may indicate that strong overall academic performance is a good predictor of success in a given term.
+The plot between term_units and term_gpa shows that participants are achieving relatively similar GPA regardless of the number of terms. This may also imply that students are able to maintain a similar performance levels regardless of the academic workload.
+The higher concentration of points in the region where zterm values are between -2 and 2, and where term_gpa is around 4, indicates that many students are performing at a high level (close to a perfect GPA) while having standardized term units (z-score) that fall within this moderate range. This suggests that students with a balanced or moderate load of term units are likely to achieve higher GPAs.
+
+```{r}
+ggplot(df_clean, aes(x = TotalSleepTime, y = term_gpa)) +
+  geom_point(alpha = 0.6) +
+  facet_wrap(~ demo_race) +
+  ggtitle("Total Sleep Time vs Term GPA, Faceted by Race")
+```
+The above graph shows that there is consistent sleep patterns in race group 1, and this group also achieve a good term_gpa. And the sleep pattern within the race group 0 is very inconsistent. But we can also notice that participants tend to get a good gpa when the sleep time is around 350-500 range.

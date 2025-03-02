@@ -1,0 +1,147 @@
+---
+title: 'Lab: Nonlinear Regression'
+author: "36-600"
+output:
+  html_document:
+    toc: false
+    toc_float: false
+    theme: spacelab
+  pdf_document:
+    toc: false
+---
+
+```{r}
+suppressMessages(library(tidyverse))
+```
+
+## Data
+
+We'll begin by simulating a dataset from a nonlinear curve:
+```{r}
+set.seed(555)
+x <- -5:5
+y <- 0.1*x^3 - 0.5*x + 2.1 + rnorm(length(x),mean=0,sd=0.5*(1+abs(x)))
+e <- 0.5*(1+abs(x))
+
+df <- data.frame("x"=x,"y"=y,"e"=e)
+
+suppressMessages(library(tidyverse))
+ggplot(data=df,mapping=aes(x=x,y=y)) +
+  geom_errorbar(aes(ymin=y-e, ymax=y+e), width=.1,color="blue") +
+  geom_point(color="firebrick")
+```
+
+# Questions
+
+## Question 1
+
+Implement a (weighted) global cubic polynomial regression model in a similar manner to that implemented in the notes; namely, that means learn the model, run predict to determine the regression line, plot the data with the regression line superimposed, show the coefficients, and compute the mean-squared error. Like we did(n't do) in the notes, do not split the data into training and test datasets.
+```{r}
+# REPLACE ME WITH CODE
+pr.out <- lm(y~poly(x,3,raw = TRUE), data = df, weights = 1/(e^2))
+pr.pred <- predict(pr.out, newdata = df)
+mse <- mean((df$y-pr.pred)^2)
+print(mse)
+
+# Plot the data with the regression line
+ggplot(data=df,mapping=aes(x=x,y=y)) +
+  geom_errorbar(aes(ymin=y-e, ymax=y+e), width=.1,color="blue") +
+  geom_point(color="firebrick") +
+  geom_line(aes(y = pr.pred), color = "red", size = 1) +
+  ggtitle("Cubic Polynomial Regression") +
+  theme_minimal()
+```
+
+## Question 2
+
+Repeat Q1, but utilizing a regression splines model. Assume four degrees of freedom.
+```{r fig.width=4,fig.height=4,fig.align="center"}
+# REPLACE ME WITH CODE
+suppressMessages(library(splines))
+set.seed(1)
+pr.out <- lm(y~bs(x,df = 4), data = df, weights = 1/(e^2))
+pr.pred <- predict(pr.out)
+mse <- mean((df$y-pr.pred)^2)
+print(mse)
+
+data.frame("Estimate"=
+ summary(pr.out)$coefficients[,1])
+
+# Plot the data with the regression line
+ggplot(data=df,mapping=aes(x=x,y=y)) +
+  geom_errorbar(aes(ymin=y-e, ymax=y+e), width=.1,color="blue") +
+  geom_point(color="firebrick") +
+  geom_line(aes(y = pr.pred), color = "red", size = 1) +
+  ggtitle("Polynomial Regression with four degrees of freedom") +
+  theme_minimal()
+```
+
+## Question 3
+
+Repeat Q1, but with a smoothing spline model. Note that you may get a "surprising" result.
+```{r fig.width=4,fig.height=4,fig.align="center"}
+# REPLACE ME WITH CODE
+ss.out <- suppressWarnings(
+ smooth.spline(df$x,y=df$y,w=1/(df$e^2),cv=TRUE)
+)
+ss.out$lambda
+ss.pred <- predict(ss.out)
+mean((y-ss.pred$y)^2)
+
+# Plot the data with the regression line
+ggplot(data=df,mapping=aes(x=x,y=y)) +
+  geom_errorbar(aes(ymin=y-e, ymax=y+e), width=.1,color="blue") +
+  geom_point(color="firebrick") +
+  geom_line(aes(y = ss.pred$y), color = "red", size = 1) +
+  ggtitle("Smoothing Splines") +
+  theme_minimal()
+```
+
+## Question 4
+
+Repeat Q1, but with a local polynomial regression model. Assume a `span` of 0.6.
+```{r}
+# REPLACE ME WITH CODE
+lpr.out <- loess(y~x,data=df,weights=1/(df$e)^2,span=0.6)
+lpr.pred <- predict(lpr.out)
+
+mse_lpr <- mean((df$y - lpr.pred)^2)
+print(mse_lpr)
+
+# Plot the data with the regression line
+ggplot(data=df,mapping=aes(x=x,y=y)) +
+  geom_errorbar(aes(ymin=y-e, ymax=y+e), width=.1,color="blue") +
+  geom_point(color="firebrick") +
+  geom_line(aes(y = lpr.pred), color = "red", size = 1) +
+  ggtitle("Local Polynomial Regression") +
+  theme_minimal()
+```
+
+## Question 5
+
+Redo the plot in Q4, but let's add a one-standard-error confidence band. You can do this by running the first line, then adding the last two lines onto your `ggplot()` call:
+```
+p <- predict(lpr.out,se=TRUE)
+
++ geom_line(mapping=aes(x=lpr.out$x,y=lpr.out$fitted+p$se),color="[your color]",linetype="dashed")
++ geom_line(mapping=aes(x=lpr.out$x,y=lpr.out$fitted-p$se),color="[your color]",linetype="dashed")
+```
+What does the band actually mean? Because it's a one-standard-error band, it means that for any given $x$, there is an approximately 68% chance that the band overlaps the true underlying function value. This is a rough statement, though, given the correlation between neighboring data points (i.e., the lack of independence between $y_{i-1}$, $y_i$, and $y_{i+1}$, etc.). Just think of the band as a notion of how uncertain your fitted curve is at each $x$: is the band thin, or wide? Note that the bands get wider as we get to either end of the data: this is an expected feature, not a bug. There's fewer data within the span at either end, so the fitted function is that much more uncertain.
+```{r}
+# REPLACE ME WITH CODE
+p <- predict(lpr.out,se=TRUE)
+
+# Compute Mean Squared Error (MSE) as before (optional)
+mse_lpr <- mean((df$y - p$fit)^2)
+print(mse_lpr)
+
+# Plot the data with error bars, the regression line, and the confidence band
+ggplot(data = df, mapping = aes(x = x, y = y)) +
+  geom_errorbar(aes(ymin = y - e, ymax = y + e), width = 0.1, color = "blue") +
+  geom_point(color = "firebrick") +
+  geom_line(aes(y = p$fit), color = "red", size = 1) +
+  geom_line(aes(x = lpr.out$x, y = p$fit + p$se.fit), color = "purple", linetype = "dashed") +
+  geom_line(aes(x = lpr.out$x, y = p$fit - p$se.fit), color = "purple", linetype = "dashed") +
+  ggtitle("Local Polynomial Regression with Confidence Band") +
+  theme_minimal()
+```

@@ -1,0 +1,292 @@
+---
+title: "Project_3"
+author: "Sahana Krishna Murthy"
+date: "2024-11-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Loading the data set into a dataframe:
+```{r}
+df <- read.csv("wineQuality.csv" , stringsAsFactors = TRUE)
+summary(df)
+nrow(df)
+```
+The dataset shows a wide range of chemical properties, indicating diverse wine samples.
+Variables like volatile acidity, residual sugar, and alcohol levels may be key factors in distinguishing wine quality ("GOOD" vs. "BAD").
+
+Removing NA rows:
+```{r}
+suppressMessages(library(dplyr))
+df_clean <- df %>% filter(complete.cases(.))
+nrow(df)
+```
+No NA values found. Therefore, the total count of rows before and after running the above code block remains the same: 6497 rows.
+
+Removing Outliers:
+```{r}
+suppressMessages(library(tidyverse))
+# Function to calculate Z-scores
+calculate_z_scores <- function(x) {
+  (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+}
+
+# Add Z-scores for numeric predictors only in df_clean
+z_scores <- df_clean %>%
+  mutate(across(where(is.numeric), calculate_z_scores, .names = "z_{col}"))
+
+summary(z_scores) 
+
+# Identify rows with outliers (|Z| > 3 in any column)
+outliers <- z_scores %>%
+  filter(if_any(starts_with("z_"), ~ abs(.) > 3))
+
+cat("Outliers:", nrow(outliers), "rows\n")
+
+# Remove rows with outliers from df_clean
+data_cleaned <- z_scores %>%
+  filter(across(where(is.numeric), ~ !str_detect(cur_column(), "^z_") | abs(.) <= 3))
+
+# Remove the 'z_*' columns before final output
+data_cleaned <- data_cleaned %>%
+  select(-starts_with("z_"))
+
+nrow(data_cleaned)  # Check the number of rows after outlier removal
+```
+From the output of the above code, we can see that there are 906 outliers in this dataset. Which is why the total number of rows reduce to 5591 after running the above code block.
+
+Splitting of data into training and test sets:
+```{r}
+set.seed(100)
+
+s <- sample(length(data_cleaned$label) , round(0.7*length(data_cleaned$label)))
+df.train <- data_cleaned[s,]
+df.test <- data_cleaned[-s,]
+```
+The dataset is split into training and test sets by selecting 70 % of the rows for training and the rest 30% for testing the model performance.
+
+Logistic Regression:
+```{r}
+log.out <- glm(label ~ . , data = df.train , family = binomial)
+
+resp.prob = predict(log.out,newdata=df.test,type="response")
+```
+The above code block trains the df.train dataset using the logistic regression model. Where the target variable "label" is regressed upon the rest of the response variables.
+
+ROC curve for Logistic Regression:
+```{r}
+suppressMessages(library(pROC))
+
+(roc.log <- roc(df.test$label,resp.prob))
+plot(roc.log,col="red",xlim=c(1,0),ylim=c(0,1))
+roc.log
+```
+The above code block is used to plot the ROC curve for the logistic regression model.
+
+AUC:
+```{r}
+log.auc <- round(roc.log$auc,3)
+cat("AUC for logistic regression: ",log.auc,"\n")
+```
+The above code provides the area under the curve for logistic regression model. An AUC of 0.79 suggests that the logistic regression model has a fairly strong ability to separate the two classes. While it's not perfect, the model performs better than random guessing and demonstrates reasonable discriminatory power.
+
+Youden's J statistic:
+```{r}
+log.J <- roc.log$sensitivities + roc.log$specificities - 1
+w <- which.max(log.J)
+cat("Optimum threshold for logistic regression: ",round(roc.log$thresholds[w],3),"\n")
+optimal_threshold <- roc.log$thresholds[w]
+resp.pred = ifelse(resp.prob>optimal_threshold,"GOOD","BAD")
+log.mcr <- round(mean(resp.pred!= df.test$label),3) # compressed MCR calculator
+tab <- table(Predicted = resp.pred, Actual = df.test$label)
+cat("Misclassification rate for logistic regression: " ,log.mcr)
+
+print(tab)
+```
+The logistic regression model has a misclassification rate of 0.288, meaning 28.8% of predictions are incorrect on the test set. This is a moderate performance, with nearly 71% accuracy. There are 331 false negatives, suggesting the model might miss identifying 'GOOD' cases more often than desired. This could be critical depending on the context of the 'GOOD' classification. There are 152 false positives, which may indicate some overestimation of 'GOOD' cases. The model is better at identifying 'GOOD' cases than 'BAD' cases, given the higher count of True Positives (723) compared to True Negatives (471).
+
+
+Random forest:
+```{r}
+suppressMessages(library(tidyverse))
+suppressMessages(library(randomForest))
+rf.out = randomForest(label~.,data=df.train,
+importance=TRUE)
+```
+A Random Forest classifier is trained using the training dataset df.train, with the target variable label and all other variables as predictors.
+
+ROC, AUC, J statistic for Random Forest:
+```{r}
+# Get predicted probabilities for the "GOOD" class
+ resp.prob <- predict(rf.out, newdata = df.test, type = "prob")[, "GOOD"]
+
+(roc.rf <- roc(df.test$label,resp.prob))
+plot(roc.rf,col="red",xlim=c(1,0),ylim=c(0,1))
+roc.rf
+
+rf.auc <- round(roc.rf$auc,3)
+cat("AUC for Random Forest: ",round(roc.rf$auc,3),"\n")
+
+rf.J <- roc.rf$sensitivities + roc.rf$specificities - 1
+w <- which.max(rf.J)
+rf.J.tab <- rf.J[w]
+print(rf.J.tab)
+optimal_threshold <- roc.rf$thresholds[w]
+cat("Optimum threshold for Random Forest: ",optimal_threshold,"\n")
+
+# Use the optimal threshold to classify the test data
+resp.pred <- ifelse(resp.prob > optimal_threshold, "GOOD", "BAD")
+
+# Calculate MCR
+rf.mcr <- round(mean(resp.pred != df.test$label), 3)
+
+# Print MCR
+print(paste("Random Forest MCR:", rf.mcr))
+
+confusion_matrix <- table(Predicted = resp.pred, Actual = df.test$label)
+confusion_df <- as.data.frame(confusion_matrix)
+
+ggplot(confusion_df, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile(color = "black") +
+  geom_text(aes(label = Freq), color = "white", size = 5) +
+  scale_fill_gradient(low = "lightblue", high = "blue") +
+  labs(title = "Confusion Matrix", x = "Actual Labels", y = "Predicted Labels") +
+  theme_minimal()
+```
+The Area Under the Curve (AUC) for the Random Forest model is 0.894, indicating excellent discriminatory ability between the classes ("GOOD" and "BAD").The maximum value of Youden's J statistic is 0.635, representing the model's optimal balance between sensitivity and specificity. The optimal threshold for classifying probabilities is 0.645, which was used to convert probabilities into class predictions. The misclassification rate (MCR) for the Random Forest model is 0.187, indicating that 18.7% of test samples were misclassified. This is a lower MCR compared to logistic regression, implying better performance. From the confusion matrix, we observe that the model has a higher number of false positives, which might suggest slightly over-predicting the "GOOD" class.
+
+Gradient Boosting:
+```{r}
+set.seed(101)
+suppressMessages(library(xgboost))
+
+# Convert "GOOD" and "BAD" to numeric labels (1 for "GOOD", 0 for "BAD")
+df.train$label <- as.numeric(df.train$label == "GOOD")
+df.test$label <- as.numeric(df.test$label == "GOOD")
+
+train <- xgb.DMatrix(data=as.matrix(df.train[,1:10]),label=df.train$label)
+test <- xgb.DMatrix(data=as.matrix(df.test[,1:10]),label=df.test$label)
+
+# Hyperparameters
+params <- list(
+  objective = "binary:logistic", # For binary classification
+  eta = 0.1,                     # Learning rate
+  max_depth = 6,                 # Maximum tree depth
+  min_child_weight = 1,          # Minimum sum of instance weight in a child
+  subsample = 0.8,               # Row sampling ratio
+  colsample_bytree = 0.8         # Feature sampling ratio
+)
+
+# Cross-validation
+xgb.cv.out <- xgb.cv(
+  params = params, 
+  data = train, 
+  nrounds = 30, 
+  nfold = 5, 
+  verbose = 0, 
+  metrics = "auc" # Evaluate using AUC
+)
+
+# Identify the optimal number of trees
+optimal_trees <- which.max(xgb.cv.out$evaluation_log$test_auc_mean)
+auc.max <- max(xgb.cv.out$evaluation_log$test_auc_mean)
+cat("The optimal number of trees is ", which.max(xgb.cv.out$evaluation_log$test_auc_mean), "\n")
+cat("Best AUC: ", round(auc.max, 3), "\n")
+```
+The optimal number of trees identified through cross-validation is 30, suggesting that this is the most effective iteration for balancing model complexity and performance. The best AUC achieved during cross-validation is 0.809, indicating good performance in distinguishing between the "GOOD" and "BAD" classes.
+
+```{r}
+# Train final model
+xgb.out <- xgboost(
+  data = train, 
+  nrounds = optimal_trees, 
+  params = params, 
+  verbose = 0
+)
+
+# Predict probabilities
+resp.prob <- predict(xgb.out, newdata = test)
+```
+The Gradient Boosting model was trained using the optimal number of trees (30) and specified hyperparameters. Probabilities for the test dataset were successfully predicted, ready for further evaluation such as thresholding, ROC analysis, or classification performance assessment.
+
+ROC, AUC, J statistic for gradient  boosting:
+```{r}
+# Get predicted probabilities for the "GOOD" class
+(roc.gbm <- roc(df.test$label,resp.prob))
+plot(roc.gbm,col="red",xlim=c(1,0),ylim=c(0,1))
+roc.gbm
+
+xgb.auc <- round(roc.gbm$auc,3)
+cat("AUC for gradient boosting: ",xgb.auc,"\n")
+
+xgb.J <- roc.gbm$sensitivities + roc.gbm$specificities - 1
+w <- which.max(xgb.J)
+cat("Optimum threshold for Gradient Boosting: ",round(roc.log$thresholds[w],3),"\n")
+
+# Convert probabilities to predictions using the optimal threshold
+resp.pred <- ifelse(resp.prob > optimal_threshold, 1, 0)
+
+# Calculate Misclassification Rate (MCR)
+xgb.mcr <- mean(resp.pred != df.test$label) # Now both are numeric
+cat("Misclassification Rate (MCR): ", round(xgb.mcr, 3), "\n")
+
+# Evaluate performance
+confusion.mat <- table(Predicted = resp.pred, Actual = ifelse(df.test$label == 1, "GOOD", "BAD"))
+accuracy <- sum(diag(confusion.mat)) / sum(confusion.mat)
+cat("Confusion Matrix:\n")
+print(confusion.mat)
+cat("Accuracy: ", round(accuracy, 3), "\n")
+```
+AUC (Area Under Curve): The AUC of 0.821 suggests that the gradient boosting model has good capability to distinguish between the "GOOD" and "BAD" classes. However, it performs slightly less effectively than the Random Forest model (AUC = 0.894).
+
+Optimal Threshold: The best threshold for classification was determined to be 0.606. This means that if the predicted probability for the "GOOD" class exceeds 0.606, it is classified as "GOOD"; otherwise, it is classified as "BAD."
+
+Misclassification Rate (MCR): The MCR of 0.252 indicates that about 25.2% of predictions were incorrect.
+
+Accuracy: The model achieved an accuracy of 74.8%, meaning that approximately 75% of all predictions (both "GOOD" and "BAD") were correct.
+
+
+Table for summary of the models:
+```{r}
+final_table <- data.frame(Model_Name = c("Logistic Regression" , "Random Forest" , "Gradient Boosting") , MCR = c(log.mcr , rf.mcr , xgb.mcr) , AUC = c(log.auc , rf.auc , xgb.auc) , J_statistic = c(log.J[w] , rf.J.tab , xgb.J[w]))
+print(final_table)
+```
+Observations:
+Misclassification Rate (MCR):
+
+Random Forest performs the best, with the lowest MCR of 0.187.
+Logistic Regression has the highest MCR at 0.288, indicating relatively more classification errors.
+AUC (Area Under the Curve):
+
+Random Forest achieves the highest AUC (0.895), reflecting the best ability to separate classes.
+Logistic Regression has the lowest AUC (0.79), suggesting weaker separation ability.
+J-Statistic:
+
+Random Forest achieves the highest J-Statistic (0.635), demonstrating the best balance between sensitivity and specificity.
+Gradient Boosting and Logistic Regression have lower J-Statistics, with Gradient Boosting slightly outperforming Logistic Regression.
+
+Random Forest is the most robust overall, with the highest AUC and J-Statistic.
+Gradient Boosting achieves the lowest MCR, suggesting good predictive accuracy at its optimal threshold.
+Logistic Regression is the weakest performer among the three models based on all metrics.
+
+ROC Overlay
+```{r}
+plot(roc.log, col = "red", lwd = 2, main = "ROC Curves for Models")
+plot(roc.rf, col = "blue", add = TRUE, lwd = 2)
+plot(roc.gbm, col = "seagreen", add = TRUE, lwd = 2)
+legend("bottomright", legend = c("Logistic", "Random Forest", "Gradient Boosting"),
+       col = c("red", "blue", "seagreen"), lwd = 2)
+```
+
+The ROC curve shown in the overlay compares the performance of three models: Logistic Regression (red), Random Forest (blue), and Gradient Boosting (green). Here are the key inferences from the plot:
+
+1. **Random Forest (blue)** performs the best, as its ROC curve is the furthest from the diagonal (representing random classification). This indicates that Random Forest has the highest true positive rate (sensitivity) and a low false positive rate (1-specificity), making it the most effective model at distinguishing between the two classes.
+
+2. **Gradient Boosting (green)** is the second-best model, as its ROC curve is slightly above that of Logistic Regression. It shows a good balance of sensitivity and specificity, although not as optimal as Random Forest.
+
+3. **Logistic Regression (red)** has the ROC curve closest to the diagonal, indicating its performance is closer to random guessing. This suggests that, compared to the other models, Logistic Regression struggles more in distinguishing between the classes.
+
+Overall, **Random Forest** appears to be the most reliable model, followed by **Gradient Boosting**, with **Logistic Regression** being the least effective. The ROC curve confirms the AUC results, with Random Forest having the highest AUC and Logistic Regression having the lowest.

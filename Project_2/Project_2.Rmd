@@ -1,0 +1,295 @@
+---
+title: "Project_2"
+author: "Sahana Krishna Murthy"
+date: "2024-10-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+Loading the data and summary
+```{r}
+df <- read.csv("stellar_temperature.csv")
+summary(df)
+nrow(df)
+```
+From the summary above we see that the dataframe has 10000 rows and around 12 cols.
+
+Boxplot for Outlier detection
+```{r}
+library(ggplot2)
+ggplot(data = df , mapping = aes(y = df$teff)) +
+  geom_boxplot(outliers = TRUE , outlier.color = "darkred" , fill = "seagreen") +
+  labs(title = "Boxplot of Effective Temperature (teff)" ,
+       y = "Effective Temperature")
+```
+
+```{r}
+library(reshape2)
+library(dplyr)
+
+# Melt the dataframe to long format for ggplot
+df_pred <- df %>% select(-teff)
+df_long <- melt(df_pred , id.vars = NULL, measure.vars = names(df_pred))
+
+# Plot multiple boxplots
+ggplot(df_long, aes(x = variable, y = value)) +
+  geom_boxplot(fill = "black" , outlier.colour = "red", outlier.shape = 16, outlier.size = 2) +
+  labs(title = "Boxplots of All Variables", x = "Variables", y = "Values") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_minimal()
+```
+```{r}
+outliers_boxplot <- boxplot.stats(df$teff)$out
+outliers_boxplot
+```
+The code above shows that there are outliers for almost all variables. But we are keeping them as is for further modelling.
+
+NA values
+```{r}
+library(ggplot2)
+missing_data <- sapply(df, function(x) sum(is.na(x)))
+missing_data
+```
+```{r}
+sum(is.na(df))
+```
+```{r}
+df.new<-df
+sapply(df.new, class)
+```
+
+Histograms for the predictive variables
+```{r}
+library(ggplot2)
+
+# Function to create a histogram for a specific variable
+create_histogram <- function(df, var) {
+  ggplot(df, aes_string(x = var)) +  # aes_string() allows dynamic variable names
+    geom_histogram(fill = "brown", color = "white", bins = 30) +
+    ggtitle(paste("Histogram of", var)) + 
+    theme_minimal()
+}
+
+# Get the names of all numeric variables in the dataset
+vars <- names(df)
+
+# Loop through all numeric variables and plot histograms
+for (var in vars) {
+  print(create_histogram(df, var))  # Display the histogram
+}
+```
+
+From the histograms above we see that the variables br_col and parallax are not normally distributed. So, these columns will be transformed before modelling.
+
+Transforming Predictive Variables
+```{r}
+df$parallax= sqrt(df$parallax)
+ggplot(df, aes_string(x = df$parallax)) +  # aes_string() allows dynamic variable names
+    geom_histogram(fill = "seagreen", color = "white", bins = 30) +
+    ggtitle(paste("Histogram of Parallax")) + 
+    xlab("parallax") +
+    theme_minimal()
+
+df$br_col = sqrt(df$br_col)
+ggplot(df, aes_string(x = df$br_col)) +  # aes_string() allows dynamic variable names
+    geom_histogram(fill = "seagreen", color = "white", bins = 30) +
+    ggtitle(paste("Histogram of Br_col")) + 
+    xlab("Brcol")
+    theme_minimal()
+```
+
+Correlation Analysis
+```{r}
+df <- na.omit(df)
+cor_matrix <- cor(df[, sapply(df, is.numeric)])
+library(corrplot)
+corrplot(cor_matrix, method = "circle")
+```
+From the above correlation matrix, we can infer that the columns g_mag, b_mag and r_mag are multicollinear. But, mitigating it by removing the variables might have an impact on the model's predictive ability.
+
+Splitting the data into training and test sets
+```{r}
+set.seed(101)
+s <- sample(length(df$teff) , round(0.7*length(df$teff)))
+df.train <- df[s,]
+df.test <- df[-s,]
+```
+The dataset is split into training and test sets by selecting 70 % of the rows for training and the rest 30% for testing the model performance.
+
+
+Linear Regression Model
+```{r}
+lm.out <- lm(teff ~ ., data = df.train)
+summary(lm.out)
+```
+Overall, the model appears to fit the data quite well, explaining a substantial amount of variability in the response variable with a relatively low residual standard error. The strong significance indicated by the F-statistic and the p-value suggests that the predictors used in the model have a meaningful relationship with the response variable.
+
+
+Mean Square Error
+```{r}
+y.hat = predict(lm.out, newdata = df.test)
+# valid_idx <- !is.na(y.hat) & !is.na(df.test$teff)
+# mse <- mean((df.test$teff[valid_idx] - y.hat[valid_idx])^2)
+mse <- mean((df.test$teff - y.hat)^2)
+residuals <- df.test$teff - y.hat
+print(mse)
+
+# Residual Plot
+ggplot(data = data.frame(y.hat, residuals), aes(x = y.hat, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Residuals vs Predicted Values", x = "Predicted Values", y = "Residuals") +
+  theme_minimal()
+
+# Histogram of residuals to check normality
+ggplot(data = data.frame(residuals), aes(x = residuals)) +
+  geom_histogram(binwidth = 100, fill = "blue", color = "white") +
+  labs(title = "Histogram of Residuals", x = "Residuals", y = "Frequency") +
+  theme_minimal()
+```
+
+The MSE of 172450 indicates a significant average squared difference between the actual values and the predicted values. This suggests that, while the model captures some trends in the data, there may still be room for improvement in its predictive accuracy.
+
+While the linear regression model shows promise with a normal distribution of residuals and general accuracy, attention to outliers and potential model enhancements could lead to improved predictive performance. 
+
+Root mean square error
+```{r}
+rmse <- sqrt(mse)
+print(rmse)
+```
+
+Diagnostic Plot
+```{r}
+df_plot <- data.frame(
+  Observed = df.test$teff,
+  Predicted = y.hat
+)
+
+axis_limits <- range(c(df_plot$Observed, df_plot$Predicted))
+
+# Plot: Observed vs Predicted with a diagonal line
+ggplot(df_plot, aes(x = Observed, y = Predicted)) +
+  geom_point(alpha = 0.6, color = "blue") +  # Points for each observation
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed", linewidth = 1) +  # Diagonal line
+  xlim(axis_limits) + ylim(axis_limits) +  # Same limits for both axes
+  labs(title = "Observed vs Predicted Values", x = "Observed", y = "Predicted") +
+  theme_minimal()
+```
+The points clustering closely around the red dashed line (which represents the line of perfect prediction) suggest that your model's predictions are generally accurate. When observed values are close to the predicted values, it indicates a good fit.
+The slight scattering of points around the diagonal line suggests that while the predictions are mostly accurate, there are still some discrepancies. This indicates variability in how well the model predicts certain observations, which aligns with your previous RMSE and residual analysis findings.
+The slight scattering of points around the diagonal line suggests that while your predictions are mostly accurate, there are still some discrepancies. This indicates variability in how well the model predicts certain observations, which aligns with your previous RMSE and residual analysis findings.
+
+
+Check for multicollinearity using Variance Inflation Factor
+```{r}
+suppressMessages(library(car))
+reduced_df <- df.train
+lm.out <- lm(teff~.,data=reduced_df)
+vif(lm.out)
+```
+The majority of some predictors (e.g., ra_x, dec_x, parallax, pmra, pmdec, L, B) have VIF values well below 10, indicating that multicollinearity is not a concern for these variables.
+However, there are extremely high VIF values for g_mag, b_mag, r_mag, and br_col, suggesting significant multicollinearity among these variables. Specifically:
+g_mag has a VIF of 17955.152, indicating severe multicollinearity.
+b_mag (VIF of 4790.170), r_mag (VIF of 13897.434), and br_col (VIF of 186.675) also indicate substantial multicollinearity.
+
+
+Best Subset Selection
+```{r}
+library(dplyr)
+library(bestglm)
+
+set.seed(101)
+
+# Ensure 'y' is numeric after renaming
+df.renamed <- df %>% rename(y = teff)
+df.renamed$y <- as.numeric(df.renamed$y)  # Ensure y is numeric
+
+# Split the data into training and test sets
+s <- sample(length(df.renamed$y), round(0.7 * length(df.renamed$y)))
+df.train <- df.renamed[s, ]
+df.test <- df.renamed[-s, ]
+df.train <- na.omit(df.train)
+df.test <- na.omit(df.test)
+
+# Fit the full linear model
+lm.out <- lm(y ~ ., data = df.train)
+
+# Compute the MSE for the full model
+mse.full <- mean((predict(lm.out, newdata = df.test) - df.test$y) ^ 2)  # df.test$y, not df.test$teff
+print(paste("MSE of the full model:", mse.full))
+
+# Perform best subset selection using bestglm
+bg.bic <- bestglm(df.train, family = gaussian, IC = "BIC")
+bg.bic$BestModel
+
+bg.aic <- bestglm(df.train, family = gaussian, IC = "AIC")
+bg.aic$BestModel
+
+# Number of predictors in BIC-selected model (excluding intercept)
+bic_predictors <- length(coef(bg.bic$BestModel)) - 1
+print(bic_predictors)
+
+# Number of predictors in AIC-selected model (excluding intercept)
+aic_predictors <- length(coef(bg.aic$BestModel)) - 1
+print(aic_predictors)
+
+#BSS MSE
+bic_mse <- mean((df.test$y - bic_predictors)^2)
+print(bic_mse)
+```
+
+The MSE of the full model is 172450.04, indicating the average squared difference between the predicted values and the actual values in the test set. This value provides a baseline for evaluating the performance of more refined models.
+The stark difference in MSE values indicates that the subset of predictors chosen by the BIC method does not perform well compared to the full model. This suggests that either:
+Important predictors may have been excluded from the BIC-selected model.
+The interactions or non-linear relationships may not be adequately captured with the chosen predictors.
+
+PCA
+```{r}
+# Replace NA values in each column with the column mean
+df <- data.frame(lapply(df, function(x) {
+  if (is.numeric(x)) {
+    x[is.na(x)] <- mean(x, na.rm = TRUE)
+  }
+  return(x)
+}))
+
+pca.out <- prcomp(df[,-1] , scale = TRUE)
+v <- pca.out$sdev^2
+# round(cumsum(v/sum(v)) , 3)
+
+pve <- v / sum(v)
+ggplot(data.frame(p=1:ncol(df[,-1]),c = cumsum(pve)),mapping=aes(x=p,y=c)) +
+  geom_point()
+
+round(pca.out$rotation[,1:10],9)
+```
+Replaced NA values in numeric columns with the respective column means. This imputation helps maintain the integrity of the dataset while preparing it for PCA.
+The loadings for the first 10 principal components (PCs) reveal the contribution of each original variable to the PCs. Key observations include:
+PC1:
+g_mag, b_mag, and r_mag have high positive loadings, indicating that they contribute significantly to this component. This may suggest that these variables are correlated with some underlying factor (like brightness).
+parallax shows a substantial negative loading, indicating an inverse relationship.
+PC2:
+dec_x, B, and pmra are notable contributors, with both positive and negative values, suggesting a different dimension of variability in the dataset.
+PC3:
+L has the highest positive loading, indicating it is an important factor along with other variables.
+PC4 to PC10: Each subsequent component contributes differently, with various combinations of positive and negative loadings across variables, reflecting diverse relationships among them.
+
+PC Regression
+```{r}
+set.seed(120)
+df.pc <- data.frame(pca.out$x,df$teff) %>% select(-PC10, -PC11)
+names(df.pc) <- c("PC1","PC2","PC3","PC4","PC5","PC6","PC7","PC8","PC9","y")
+summary(df.pc)
+lm.out <- lm(y ~.,data=df.pc,subset=s)
+lm.pred <- predict(lm.out,newdata=df.pc[-s,])
+mean((lm.pred-df.pc$y[-s])^2)
+```
+
+Principal Components as Predictors: Using principal components can effectively reduce dimensionality while retaining significant information from the original dataset, which may help in avoiding overfitting that can occur with high-dimensional datasets.
+
+The MSE of 195109.8 suggests that while the model captures some variance in the data, there may still be room for improvement.

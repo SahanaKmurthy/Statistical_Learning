@@ -1,0 +1,244 @@
+---
+title: "Lab: Pure Prediction: KNN and SVM"
+author: "36-600"
+output: 
+  html_document:
+    toc: no
+    toc_float: no
+    theme: spacelab
+---
+
+# Data
+
+Below we read in the breast-cancer dataset last seen in the PCA lab:
+```{r}
+df         <- read.csv("http://www.stat.cmu.edu/~pfreeman/breastcancer.csv",stringsAsFactors=TRUE)
+response   <- df[,1]  # B for benign, M for malignant
+predictors <- data.frame(scale(df[,-1]))
+df         <- cbind(predictors,"Label"=response)
+cat("Sample size: ",length(response),"\n")
+```
+These data reside on [Kaggle](https://www.kaggle.com/mciml/breast-cancer-wisconsin-data). They provide information on breast cancer tumors (read: features extracted from images of cells!) for 569 people in which malignancy was suspected. The data are marked by *extreme* multicollinearity and redundancy: bad for inference, but fine for prediction! You'll code KNN and SVM models for these data below.
+
+**Note that I scaled (i.e., standardized) the predictor data frame.** This is advised for both KNN and SVM.
+
+Also note: differentiating the benign and malignant tumors is pretty easy, so you will not see results that are substantially better, if at all better, than what you get when you learn a logistic regression model. The point today is the coding, not to get a reaction of "oh, wow, see how much better KNN and SVM do!"
+
+## Question 1
+
+Split the data and carry out a logistic regression analysis. (The response variable is dubbed `Label`.) Assume a class-separation threshold of 0.5, which is not optimal but good enough, particularly since changing that threshold in the context of KNN is difficult. (The optimal threshold would be nearer to 0.373. Why 0.373? The classes are imbalanced, and since `B` has more data (62.7% of the data) and is Class 0, the Class 1 probabilities will be systematically pulled downwards towards zero...and a decent guess at the optimal threshold would be 1 - 0.627 = 0.373.)
+```{r}
+# REPLACE ME WITH CODE
+set.seed(100)
+s <- sample(length(df$Label) , round(length(df$Label) * 0.7))
+df.train <- df[s,]
+df.test <- df[-s,]
+out.log <- glm(Label ~ ., data = df.train, family = binomial)
+
+predicted_probs <- predict(out.log, newdata = df.test, type = "response")
+predicted_labels <- ifelse(predicted_probs >= 0.5 , 1 , 0)
+
+table(df.test$Label, predicted_labels)
+```
+
+## Question 2
+
+Use the sample code in today's notes (altered for classification!...see Slide 10) to implement a KNN model. You will want to plot the validation-set MCR versus $k$. (Note: wherever it says `mse.k` in the notes, do `mcr.k` here...for "misclassification rate.") A value of `k.max` of 30 should be fine for you.
+
+Note: the predictors are in columns 1-20 of `df.train` and `df.test`, and the response is in column 21.
+```{r fig.align='center',fig.width=4,fig.height=4}
+# REPLACE ME WITH CODE
+# Load necessary library
+suppressMessages(library(class))
+
+# Set parameters
+k.max <- 20
+mcr.k <- numeric(k.max)
+
+# Loop over values of k to calculate MCR
+for (kk in 1:k.max) {
+  knn.out <- knn(train = df.train[, 1:20], test = df.test[, 1:20], cl = df.train[, 21], k = kk)
+  
+  # Calculate misclassification rate (MCR) for each k
+  mcr.k[kk] <- mean(knn.out != df.test[, 21])
+}
+
+# Identify the optimal number of neighbors
+k.min <- which.min(mcr.k)
+cat("The optimal number of nearest neighbors is", k.min, "\n")
+```
+
+## Question 3
+
+Re-run the `knn()` function so as to be able to extract Class 1 probabilities. As with Q2, here you are to reference Slide 10, but this time concentrate on adapting the code at the bottom. To demonstrate that you extracted the probabilities, simply histogram them. You should observe two clear peaks...one at 0, and one at 1.
+```{r fig.align='center',fig.height=4,fig.width=4}
+# REPLACE ME WITH CODE
+# Load the necessary library
+library(class)
+
+k <- 3
+
+# Run KNN with prob=TRUE to get probabilities
+knn.out <- knn(train = df.train[, 1:20], test = df.test[, 1:20], cl = df.train[, 21], k = k, prob = TRUE)
+
+# Extract Class 1 probabilities
+knn.prob <- attributes(knn.out)$prob
+class0_name <- "B"
+
+# Adjust probabilities so they represent the probability of Class 1
+w <- which(knn.out == class0_name)
+knn.prob[w] <- 1 - knn.prob[w]  # Flip probabilities for Class 1
+
+# Plot histogram to visualize the Class 1 probabilities
+hist(knn.prob, breaks = 20, main = "Histogram of Class 1 Probabilities",
+     xlab = "Class 1 Probability", col = "lightblue", border = "black")
+```
+
+## Question 4
+
+For SVM, we will work with the `e1071` package. (Its name comes from the coding for the Institute of Statistics and Probability Theory at the Technische Universitat Wien, in Vienna. It's like us calling a package `36-600`. Which we should.) Here, code a support vector classifier (meaning, do SVM with `kernel="linear"`): use the `tune()` function with a representative sequence of potential costs $C$, then extract the best model. If the optimum value of $C$ occurs at or very near the end of your sequence of potential costs, alter the sequence. The variable `best.parameters`, embedded in the output, provides the optimal value for $C$. Provide that value. Use the best model to generate predictions, a test-set MCR, and a confusion matrix.
+
+Note that `tune()` does cross-validation on the training set to estimate the optimum value of $C$. Which means that the training data are randomly assigned to folds (by default, 10...to change this, you'd make a call like `tune.control(cross=5)`). Which means you should set a random number seed before calling `tune()`. For reproducibility n'at.
+
+See the last code block of page 390 of `ISLR` (2nd edition) for an example of how to specify ranges of tuning parameters. Note there is only one here: `cost`. As for prediction: `tune()` will return an object that includes `best.model`. Pass this to `predict()` along with the argument `newdata=` whatever you call the test predictors data frame. By default, `predict()` will output a vector of class predictions, so there is no need to round off to determine classes.
+```{r}
+# REPLACE ME WITH CODE
+suppressMessages(library(e1071))
+
+set.seed(100)
+
+# Define a sequence of potential cost values for tuning
+cost_values <- 2^seq(-5, 5, by = 1)  # Adjust range if the optimum is near the sequence endpoints
+
+# Tune the SVM with a linear kernel and cross-validation to find the optimal cost parameter
+svm_tune <- tune(svm, Label ~ ., data = df.train, kernel = "linear", 
+                 ranges = list(cost = cost_values),
+                 tunecontrol = tune.control(cross = 10))
+
+# Extract the best model and the optimal cost parameter
+best_model <- svm_tune$best.model
+best_cost <- svm_tune$best.parameters$cost
+cat("The optimal cost (C) value is:", best_cost, "\n")
+
+# Make predictions on the test set using the best model
+test_predictions <- predict(best_model, newdata = df.test[, 1:20])
+
+# Calculate the misclassification rate (MCR) on the test set
+mcr <- mean(test_predictions != df.test[, 21])
+cat("Test-set Misclassification Rate (MCR):", mcr, "\n")
+
+# Generate the confusion matrix
+confusion_matrix <- table(Predicted = test_predictions, Actual = df.test[, 21])
+print("Confusion Matrix:")
+print(confusion_matrix)
+```
+
+## Question 5
+
+Now code a support vector machine with a polynomial kernel. In addition to tuning `cost`, you also have to tune the polynomial `degree`. Try integers from 2 up to some maximum number (not too large, like 4). (Note: if you get the warning `WARNING: reaching max number of iterations`, do not worry about it.)
+```{r}
+# REPLACE ME WITH CODE
+set.seed(100)
+
+# Define sequences of values for cost and degree parameters to tune
+cost_values <- 2^seq(-5, 5, by = 1)  # Range of cost values
+degree_values <- 2:4  # Polynomial degrees to try
+
+# Tune the SVM with a polynomial kernel, adjusting both cost and degree
+svm_tune_poly <- tune(svm, Label ~ ., data = df.train, kernel = "polynomial",
+                      ranges = list(cost = cost_values, degree = degree_values),
+                      tunecontrol = tune.control(cross = 10))
+
+# Extract the best model and the optimal parameters
+best_model_poly <- svm_tune_poly$best.model
+best_cost_poly <- svm_tune_poly$best.parameters$cost
+best_degree_poly <- svm_tune_poly$best.parameters$degree
+
+cat("The optimal cost (C) value is:", best_cost_poly, "\n")
+cat("The optimal polynomial degree is:", best_degree_poly, "\n")
+
+# Make predictions on the test set using the best polynomial model
+test_predictions_poly <- predict(best_model_poly, newdata = df.test[, 1:20])
+
+# Calculate the misclassification rate (MCR) on the test set
+mcr_poly <- mean(test_predictions_poly != df.test[, 21])
+cat("Test-set Misclassification Rate (MCR) with polynomial kernel:", mcr_poly, "\n")
+
+# Generate the confusion matrix
+confusion_matrix_poly <- table(Predicted = test_predictions_poly, Actual = df.test[, 21])
+print("Confusion Matrix with Polynomial Kernel:")
+print(confusion_matrix_poly)
+
+```
+
+## Question 6
+
+Now code a support vector machine with a radial kernel. In addition to tuning `cost`, you also have to tune the parameter `gamma`. Try a base-10 logarithmic sequence of values that includes -8 (for $10^{-8}$).
+```{r}
+# REPLACE ME WITH CODE
+set.seed(100)
+
+# Define sequences of values for cost and gamma parameters to tune
+cost_values <- 2^seq(-5, 5, by = 1)   # Exponentially spaced values for cost
+gamma_values <- 10^seq(-8, -1, by = 1) # Logarithmic sequence for gamma
+
+# Tune the SVM with a radial kernel, adjusting both cost and gamma
+svm_tune_radial <- tune(svm, Label ~ ., data = df.train, kernel = "radial",
+                        ranges = list(cost = cost_values, gamma = gamma_values),
+                        tunecontrol = tune.control(cross = 10))
+
+# Extract the best model and the optimal parameters
+best_model_radial <- svm_tune_radial$best.model
+best_cost_radial <- svm_tune_radial$best.parameters$cost
+best_gamma_radial <- svm_tune_radial$best.parameters$gamma
+
+cat("The optimal cost (C) value is:", best_cost_radial, "\n")
+cat("The optimal gamma value is:", best_gamma_radial, "\n")
+
+# Make predictions on the test set using the best radial model
+test_predictions_radial <- predict(best_model_radial, newdata = df.test[, 1:20])
+
+# Calculate the misclassification rate (MCR) on the test set
+mcr_radial <- mean(test_predictions_radial != df.test[, 21])
+cat("Test-set Misclassification Rate (MCR) with radial kernel:", mcr_radial, "\n")
+
+# Generate the confusion matrix
+confusion_matrix_radial <- table(Predicted = test_predictions_radial, Actual = df.test[, 21])
+print("Confusion Matrix with Radial Kernel:")
+print(confusion_matrix_radial)
+```
+## Question 7
+
+Re-run the `tune()` and `predict()` functions so as to be able to extract Class 1 probabilities. Reference the final bullet point on Slide 17. To demonstrate that you extracted the probabilities, simply histogram them. You should observe two clear peaks...one at 0, and one at 1.
+```{r fig.align='center',fig.height=4,fig.width=4}
+# REPLACE ME WITH CODE
+set.seed(202)
+
+# Define sequences of values for cost and gamma parameters to tune
+cost_values <- 10^seq(-1, 1, by = 0.5)
+gamma_values <- 10^seq(-1, 1, by = 0.4)
+
+# Tune the SVM with a radial kernel, adjusting both cost and gamma, enabling probability estimation
+tune.out <- tune(svm, Label ~ ., data = df.train, kernel = "radial",
+                 ranges = list(cost = cost_values, gamma = gamma_values),
+                 probability = TRUE)
+
+# Extract the best model and parameters
+best_model_radial <- tune.out$best.model
+best_cost <- tune.out$best.parameters$cost
+best_gamma <- tune.out$best.parameters$gamma
+cat("The estimated optimal values for C and gamma are", best_cost, "and", best_gamma, "\n")
+
+# Make predictions on the test set using the best radial model with probability estimation
+resp.pred <- predict(best_model_radial, newdata = df.test[, 1:20], probability = TRUE)
+
+# Check the structure of the probabilities attribute
+str(attr(resp.pred, "probabilities"))  # To inspect the structure of probabilities
+
+# Extract Class 1 probabilities, using the class label "M" instead of "1"
+probabilities <- attr(resp.pred, "probabilities")[, "M"]
+
+# Plot a histogram of the Class 1 probabilities
+hist(probabilities, breaks = 20, main = "Histogram of Class 1 Probabilities",
+     xlab = "Probability", col = "lightblue", border = "black")
+```

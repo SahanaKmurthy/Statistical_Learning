@@ -1,0 +1,65 @@
+---
+title: "R Introductory Material"
+output: html_notebook
+---
+
+x <- vector("logical" , 5)
+print(x)
+
+x <- rnorm(10)
+print(x)
+
+y <- x>0 & x <0.5
+print(y)
+x[y]
+x[!y]
+
+sum(x > -0.5 & x < 0)
+
+which(x > -0.5 & x < 0)
+
+w <- which(x > -0.5 & x < 0)
+cat(x , w)
+
+x[w]
+x[-w]
+
+x <- list(1:5,c("a","b"))
+x
+x[[1]]
+x[[2]][2]
+names(x) <- c("a","b")
+x
+
+x$a[3]
+
+x <- data.frame(u=1:2,v=c("a","b"),w=c(TRUE,FALSE))
+x
+typeof(x)
+class(x)
+
+
+x <- matrix(1:6,nrow=2)
+x      # the matrix filled column-by-column (column-major order)
+x[[1]] # doesn't work like you'd think it should
+x[2,1] # works: row first, then column
+
+
+x <- c(a=1,b=2,c=3)
+attr(x,"Creator") = "Peter Freeman"
+x
+
+as.vector(x)
+
+
+x <- list(c("a","b"),1:3)
+x
+unlist(x)
+
+x <- c(5,3,7,1) 
+x
+sort(x)
+order(x)
+
+
+
